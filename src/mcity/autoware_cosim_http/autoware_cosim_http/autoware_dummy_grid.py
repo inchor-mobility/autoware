@@ -8,6 +8,8 @@ Required for Autoware's planning to work.
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry, OccupancyGrid
+from std_msgs.msg import Float64
+from builtin_interfaces.msg import Time as TimeMsg
 
 
 class AutowareDummyGrid(Node):
@@ -16,6 +18,7 @@ class AutowareDummyGrid(Node):
         super().__init__('autoware_dummy_grid', **kwargs)
 
         self.saved_odom_msg = Odometry()
+        self._sim_time = 0.0
 
         # Publisher
         self.pub_occ_grid = self.create_publisher(
@@ -24,16 +27,16 @@ class AutowareDummyGrid(Node):
             10
         )
 
-        # Subscriber
+        # Subscribers
         self.sub_ego_odom = self.create_subscription(
             Odometry,
             '/localization/kinematic_state',
             self.odom_callback,
             10
         )
-
-        # Timer - 5Hz
-        self.timer = self.create_timer(0.2, self.on_timer)
+        self.sub_tick = self.create_subscription(
+            Float64, '/terasim/tick_complete', self.on_tick, 10
+        )
 
         # Initialize occupancy grid
         self.occ_grid = OccupancyGrid()
@@ -48,7 +51,10 @@ class AutowareDummyGrid(Node):
     def odom_callback(self, msg):
         self.saved_odom_msg = msg
 
-    def on_timer(self):
+    def on_tick(self, msg):
+        """Called once per SUMO step — publish occupancy grid."""
+        self._sim_time = msg.data
+
         # Center grid on CAV position
         center_x = self.saved_odom_msg.pose.pose.position.x
         center_y = self.saved_odom_msg.pose.pose.position.y

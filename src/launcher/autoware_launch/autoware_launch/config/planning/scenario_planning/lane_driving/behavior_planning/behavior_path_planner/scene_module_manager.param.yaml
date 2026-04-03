@@ -20,7 +20,7 @@
       keep_last: false
       priority: 6
       max_module_size: 1
-
+#lane change for constructionZone and stalledVehicle
     lane_change_left:
       enable_module: true
       enable_rtc: true
@@ -65,7 +65,7 @@
       keep_last: true
       priority: 1
       max_module_size: 1
-
+# avoidance 
     avoidance:
       enable_module: true
       enable_rtc: true

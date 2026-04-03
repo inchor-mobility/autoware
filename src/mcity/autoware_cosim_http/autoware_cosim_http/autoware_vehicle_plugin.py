@@ -33,6 +33,7 @@ from unique_identifier_msgs.msg import UUID as UUIDMsg
 from builtin_interfaces.msg import Duration
 import uuid
 from autoware_auto_vehicle_msgs.msg import VelocityReport, SteeringReport
+from std_msgs.msg import Float64
 
 from math import atan2, cos, sin, pi
 
@@ -48,6 +49,8 @@ class AutowareVehiclePlugin(Node):
         self.declare_parameter("simulation_id", "")
         self.declare_parameter("control_cav", True)
         self.declare_parameter("perception_range", 150.0)  # meters, 0 = sync all
+        self.declare_parameter("utm_offset_x", -4373.24)   # NCRC default
+        self.declare_parameter("utm_offset_y", -4104.69)   # NCRC default
 
         self.http_host = self.get_parameter("http_host").value
         self.http_port = self.get_parameter("http_port").value
@@ -116,10 +119,15 @@ class AutowareVehiclePlugin(Node):
         # TF broadcaster
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
 
-        # Timers
+        # Event-driven sync: subscribe to tick_complete from tick driver
+        # instead of polling on timers — sync exactly once per SUMO step
+        self.sub_tick = self.create_subscription(
+            Float64, '/terasim/tick_complete', self.on_tick, 10
+        )
+
+        # CAV timer runs on wall clock for responsive Autoware→SUMO updates
+        # (Autoware odom arrives independently of SUMO ticks)
         self.cav_timer = self.create_timer(0.02, self.on_cav_timer)  # 50Hz CAV sync
-        self.bv_timer = self.create_timer(0.1, self.on_bv_timer)     # 10Hz BV sync
-        self.status_timer = self.create_timer(0.1, self.on_status_timer)  # 10Hz vehicle status
 
         # State
         self.saved_odom_msg = Odometry()
@@ -129,11 +137,16 @@ class AutowareVehiclePlugin(Node):
 
         # Coordinate offset: Autoware local coords = SUMO local coords + UTM_offset
         # Formula: UTM_offset = sumo_net_offset - autoware_map_origin_UTM
-        # For NCRC_Circular_Route:
-        #   - SUMO net offset: (265795.09, 4673979.83)
+        # For NCRC_Circular_Route (ncrc.net.xml):
+        #   - SUMO net offset: (272722.10, 4681163.74)
         #   - Autoware origin UTM: (277095.34, 4685268.43)
+        #   - UTM_offset = (272722.10 - 277095.34, 4681163.74 - 4685268.43) = (-4373.24, -4104.69)
+        # For Ann Arbor full map (aa.net.xml):
+        #   - SUMO net offset: (265795.09, 4673979.83)
         #   - UTM_offset = (265795.09 - 277095.34, 4673979.83 - 4685268.43) = (-11300.25, -11288.60)
-        self.UTM_offset = [-11300.25, -11288.60, 0.0]  # NCRC_Circular_Route
+        utm_x = self.get_parameter("utm_offset_x").value
+        utm_y = self.get_parameter("utm_offset_y").value
+        self.UTM_offset = [utm_x, utm_y, 0.0]
 
         self.get_logger().info(f"Vehicle plugin started: {self.base_url}, sim_id={self.simulation_id}")
         self.get_logger().info(f"control_cav={self.control_cav}, perception_range={self.perception_range}m, UTM_offset={self.UTM_offset}")
@@ -208,25 +221,31 @@ class AutowareVehiclePlugin(Node):
         except:
             return self.last_state
 
-    def on_cav_timer(self):
-        """Sync CAV based on control_cav setting."""
-        # Fallback: poll for messages if callback isn't working
-        self._poll_odom_if_stale()
-
-        if self.control_cav:
-            self.sync_autoware_cav_to_terasim()
-        else:
-            self.sync_terasim_cav_to_autoware()
-
-    def on_bv_timer(self):
-        """Sync background vehicles from TeraSim to Autoware."""
+    def on_tick(self, msg):
+        """Called once per SUMO step — sync BVs, TeraSim→Autoware CAV, and vehicle status."""
+        # Sync BVs/VRUs to Autoware perception
         self.sync_terasim_vehicles_to_autoware()
 
-    def on_status_timer(self):
+        # If TeraSim controls CAV, push CAV state to Autoware and publish vehicle status
+        # When control_cav=True, Autoware's simple_planning_simulator is the authoritative
+        # source of vehicle status — publishing here would conflict and cause state machine issues
+        if not self.control_cav:
+            self.sync_terasim_cav_to_autoware()
+            self._publish_vehicle_status()
+
+    def on_cav_timer(self):
+        """Sync Autoware CAV → TeraSim (wall clock timer for responsive updates)."""
+        self._poll_odom_if_stale()
+        if self.control_cav:
+            self.sync_autoware_cav_to_terasim()
+
+    def _publish_vehicle_status(self):
         """Publish vehicle status for Autoware planning_simulator mode."""
+        stamp = self.get_clock().now().to_msg()
+
         # Velocity report
         vel_msg = VelocityReport()
-        vel_msg.header.stamp = self.get_clock().now().to_msg()
+        vel_msg.header.stamp = stamp
         vel_msg.header.frame_id = "base_link"
         vel_msg.longitudinal_velocity = self.saved_odom_msg.twist.twist.linear.x
         vel_msg.lateral_velocity = 0.0
@@ -235,8 +254,8 @@ class AutowareVehiclePlugin(Node):
 
         # Steering report
         steer_msg = SteeringReport()
-        steer_msg.stamp = self.get_clock().now().to_msg()
-        steer_msg.steering_tire_angle = 0.0  # Placeholder - TeraSim doesn't provide steering
+        steer_msg.stamp = stamp
+        steer_msg.steering_tire_angle = 0.0
         self.pub_steering_status.publish(steer_msg)
 
     def sync_autoware_cav_to_terasim(self):
@@ -264,8 +283,8 @@ class AutowareVehiclePlugin(Node):
         # Get orientation from quaternion
         orientation = self.get_orientation_from_quaternion(qx, qy, qz, qw)
 
-        # Convert rear-axle to center (Autoware uses rear-axle, SUMO uses center)
-        x, y = self.autoware_coordinate_to_center_coordinate(x, y, orientation)
+        # Convert rear-axle to front bumper (Autoware uses rear-axle, SUMO uses front bumper)
+        x, y = self.autoware_rear_axle_to_sumo(x, y, orientation)
 
         # Convert to SUMO angle (SUMO: 0=North, clockwise; ROS: 0=East, counter-clockwise)
         sumo_angle = (90 - math.degrees(orientation)) % 360
@@ -321,8 +340,8 @@ class AutowareVehiclePlugin(Node):
         cav_orientation = cav.get("orientation", 0.0)
         cav_speed = cav.get("speed", 0.0)
 
-        # Convert center to rear-axle (SUMO uses center, Autoware uses rear-axle)
-        cav_x, cav_y = self.center_coordinate_to_autoware_coordinate(cav_x, cav_y, cav_orientation)
+        # Convert front bumper to rear-axle (SUMO uses front bumper, Autoware uses rear-axle)
+        cav_x, cav_y = self.sumo_to_autoware_rear_axle(cav_x, cav_y, cav_orientation)
 
         # Get quaternion from orientation
         qx, qy, qz, qw = self.get_quaternion_from_orientation(cav_orientation)
@@ -351,8 +370,9 @@ class AutowareVehiclePlugin(Node):
         odom_msg.twist.twist = twist_msg.twist.twist
 
         # Set headers
+        stamp = self.get_clock().now().to_msg()
         header = Header()
-        header.stamp = self.get_clock().now().to_msg()
+        header.stamp = stamp
         header.frame_id = "map"
         pose_msg.header = header
         twist_msg.header = header
@@ -366,7 +386,7 @@ class AutowareVehiclePlugin(Node):
 
         # Publish TF
         t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.stamp = stamp
         t.header.frame_id = "map"
         t.child_frame_id = "base_link"
         t.transform.translation.x = cav_x
@@ -384,49 +404,37 @@ class AutowareVehiclePlugin(Node):
         if not state:
             return
 
-        now = self.get_clock().now().to_msg()
+        stamp = self.get_clock().now().to_msg()
 
         detected_objects_msg = DetectedObjects()
-        detected_objects_msg.header.stamp = now
+        detected_objects_msg.header.stamp = stamp
         detected_objects_msg.header.frame_id = "map"
 
         # Also create PredictedObjects for behavior_path_planner avoidance
         predicted_objects_msg = PredictedObjects()
-        predicted_objects_msg.header.stamp = now
+        predicted_objects_msg.header.stamp = stamp
         predicted_objects_msg.header.frame_id = "map"
 
-        # Get CAV position for filtering by perception_range
+        # BVs/VRUs are already filtered by perception_range on the TeraSim side
         vehicles = state.get("agent_details", {}).get("vehicle", {})
-        cav = vehicles.get("CAV") or vehicles.get("AV")
-        cav_x = cav["x"] if cav else 0.0
-        cav_y = cav["y"] if cav else 0.0
 
-        # Process vehicles - only DetectedObjects (PredictedObjects too expensive for moving vehicles)
+        # Process vehicles - both DetectedObjects and PredictedObjects
+        # PredictedObjects needed for behavior_path_planner avoidance
         for veh_id, veh_info in vehicles.items():
             if veh_id in ("CAV", "AV"):
                 continue
-            # Filter by perception_range if set
-            if self.perception_range > 0:
-                dx = veh_info["x"] - cav_x
-                dy = veh_info["y"] - cav_y
-                dist = math.sqrt(dx*dx + dy*dy)
-                if dist > self.perception_range:
-                    continue
             detected_object = self._create_detected_object(veh_id, veh_info)
             detected_objects_msg.objects.append(detected_object)
+            predicted_object = self._create_predicted_object(veh_id, veh_info)
+            predicted_objects_msg.objects.append(predicted_object)
 
-        # Process VRUs - only DetectedObjects
+        # Process VRUs - both DetectedObjects and PredictedObjects
         vrus = state.get("agent_details", {}).get("vru", {})
         for vru_id, vru_info in vrus.items():
-            # Filter by perception_range if set
-            if self.perception_range > 0:
-                dx = vru_info["x"] - cav_x
-                dy = vru_info["y"] - cav_y
-                dist = math.sqrt(dx*dx + dy*dy)
-                if dist > self.perception_range:
-                    continue
             detected_object = self._create_detected_object(vru_id, vru_info, is_pedestrian=True)
             detected_objects_msg.objects.append(detected_object)
+            predicted_object = self._create_predicted_object(vru_id, vru_info, is_pedestrian=True)
+            predicted_objects_msg.objects.append(predicted_object)
 
         # Process construction objects (cones, barriers, etc.)
         # These need PredictedObjects for behavior_path_planner avoidance
@@ -458,10 +466,12 @@ class AutowareVehiclePlugin(Node):
         classification.probability = 1.0
         detected_object.classification.append(classification)
 
-        # Pose
+        # Pose - convert SUMO front-bumper to vehicle center (DetectedObjects use center)
         x = agent_info["x"] + self.UTM_offset[0]
         y = agent_info["y"] + self.UTM_offset[1]
         orientation = agent_info.get("orientation", 0.0)
+        vehicle_length = agent_info.get("length", 4.77)
+        x, y = self.sumo_to_center(x, y, orientation, vehicle_length)
 
         pose = PoseWithCovariance()
         pose.pose.position.x = x
@@ -518,10 +528,12 @@ class AutowareVehiclePlugin(Node):
         classification.probability = 1.0
         predicted_object.classification.append(classification)
 
-        # Kinematics
+        # Kinematics - convert SUMO front-bumper to vehicle center
         x = agent_info["x"] + self.UTM_offset[0]
         y = agent_info["y"] + self.UTM_offset[1]
         orientation = agent_info.get("orientation", 0.0)
+        vehicle_length = agent_info.get("length", 4.77)
+        x, y = self.sumo_to_center(x, y, orientation, vehicle_length)
         speed = agent_info.get("speed", 0.0)
         qz = sin(orientation / 2)
         qw = cos(orientation / 2)
@@ -544,13 +556,13 @@ class AutowareVehiclePlugin(Node):
         twist.twist.linear.x = speed
         kinematics.initial_twist_with_covariance = twist
 
-        # Predicted path - just need ONE path with ONE pose for static obstacle
-        # autoware_auto_perception_msgs uses bounded sequences (up to 100), not fixed arrays
+        # Predicted path - need at least 2 poses for ObstacleCruisePlanner interpolation
+        # (1 pose causes "Failed to find interpolated obstacle pose" and container crash)
         predicted_path = PredictedPath()
         predicted_path.confidence = 1.0
         predicted_path.time_step = Duration(sec=1, nanosec=0)  # 1 second time step
 
-        # Single pose - object stays in place
+        # Current pose
         current_pose = Pose()
         current_pose.position.x = x
         current_pose.position.y = y
@@ -559,7 +571,17 @@ class AutowareVehiclePlugin(Node):
         current_pose.orientation.y = 0.0
         current_pose.orientation.z = qz
         current_pose.orientation.w = qw
-        predicted_path.path = [current_pose]
+
+        # Future pose (1 second ahead) - extrapolate from velocity
+        future_pose = Pose()
+        future_pose.position.x = x + speed * cos(orientation)
+        future_pose.position.y = y + speed * sin(orientation)
+        future_pose.position.z = 0.8
+        future_pose.orientation.x = 0.0
+        future_pose.orientation.y = 0.0
+        future_pose.orientation.z = qz
+        future_pose.orientation.w = qw
+        predicted_path.path = [current_pose, future_pose]
 
         kinematics.predicted_paths = [predicted_path]
         predicted_object.kinematics = kinematics
@@ -574,16 +596,32 @@ class AutowareVehiclePlugin(Node):
 
         return predicted_object
 
-    def center_coordinate_to_autoware_coordinate(self, x, y, heading, rear_shaft_to_center=1.5):
-        """Convert SUMO center coordinate to Autoware rear-axle coordinate."""
-        x = x - math.cos(heading) * rear_shaft_to_center
-        y = y - math.sin(heading) * rear_shaft_to_center
+    # Vehicle geometry (from vehicle_info.param.yaml):
+    #   wheel_base=2.74, front_overhang=1.0, rear_overhang=1.03
+    #   total_length = 1.0 + 2.74 + 1.03 = 4.77
+    # Reference points:
+    #   SUMO: front bumper
+    #   Autoware base_link: rear axle
+    #   Autoware DetectedObject: vehicle center
+    REAR_AXLE_TO_FRONT = 2.74 + 1.0   # 3.74m (wheelbase + front overhang)
+    FRONT_TO_CENTER = 4.77 / 2        # 2.385m (half vehicle length)
+
+    def sumo_to_autoware_rear_axle(self, x, y, heading):
+        """Convert SUMO front-bumper coordinate to Autoware rear-axle (base_link)."""
+        x = x - math.cos(heading) * self.REAR_AXLE_TO_FRONT
+        y = y - math.sin(heading) * self.REAR_AXLE_TO_FRONT
         return x, y
 
-    def autoware_coordinate_to_center_coordinate(self, x, y, heading, rear_shaft_to_center=1.5):
-        """Convert Autoware rear-axle coordinate to SUMO center coordinate."""
-        x = x + math.cos(heading) * rear_shaft_to_center
-        y = y + math.sin(heading) * rear_shaft_to_center
+    def autoware_rear_axle_to_sumo(self, x, y, heading):
+        """Convert Autoware rear-axle (base_link) to SUMO front-bumper coordinate."""
+        x = x + math.cos(heading) * self.REAR_AXLE_TO_FRONT
+        y = y + math.sin(heading) * self.REAR_AXLE_TO_FRONT
+        return x, y
+
+    def sumo_to_center(self, x, y, heading, vehicle_length=4.77):
+        """Convert SUMO front-bumper coordinate to vehicle center (for DetectedObjects)."""
+        x = x - math.cos(heading) * (vehicle_length / 2)
+        y = y - math.sin(heading) * (vehicle_length / 2)
         return x, y
 
     def get_orientation_from_quaternion(self, qx, qy, qz, qw):

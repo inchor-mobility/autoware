@@ -85,19 +85,24 @@ class McityRouteSim(Node):
             self.set_autoware_control(True)
             self.set_operation_mode(ChangeOperationMode.Request.AUTONOMOUS)
             self.get_logger().info("Enabling autoware control...")
+        elif self.autoware_state == AutowareState.ARRIVED_GOAL:
+            # Re-set the circular route so the AV loops indefinitely
+            self.set_route_points()
+            self.get_logger().info("Arrived at goal, re-setting circular route...")
 
     def init_localization(self):
         """Initialize localization with the exact same coordinates as the C++ version."""
         localization_msg = PoseWithCovarianceStamped()
         
-        localization_msg.pose.pose.position.x = 133.0123291015625
-        localization_msg.pose.pose.position.y = 21.05602264404297
+        # Start of NCRC circular route (edge 44119073300)
+        localization_msg.pose.pose.position.x = -2.47
+        localization_msg.pose.pose.position.y = 1309.13
         localization_msg.pose.pose.position.z = 0.0
-        
+
         localization_msg.pose.pose.orientation.x = 0.0
         localization_msg.pose.pose.orientation.y = 0.0
-        localization_msg.pose.pose.orientation.z = 0.36693415416239533
-        localization_msg.pose.pose.orientation.w = 0.9302469169576041
+        localization_msg.pose.pose.orientation.z = 0.6975823055
+        localization_msg.pose.pose.orientation.w = 0.7165046594
         
         # Set header
         localization_msg.header.stamp = self.get_clock().now().to_msg()
@@ -106,52 +111,45 @@ class McityRouteSim(Node):
         # Publish
         self.pub_local.publish(localization_msg)
 
+    def _make_pose(self, x, y, qz, qw):
+        """Create a Pose with given position and orientation."""
+        p = Pose()
+        p.position.x = x
+        p.position.y = y
+        p.position.z = 0.0
+        p.orientation.x = 0.0
+        p.orientation.y = 0.0
+        p.orientation.z = qz
+        p.orientation.w = qw
+        return p
+
     def set_route_points(self):
-        """Set route points with the exact same coordinates as the C++ version."""
-        wp0 = Pose()
-        wp0.position.x = 153.94821166992188
-        wp0.position.y = 209.9748077392578
-        wp0.position.z = 0.0
-        wp0.orientation.x = 0.0
-        wp0.orientation.y = 0.0
-        wp0.orientation.z = 0.7040023080395935
-        wp0.orientation.w = 0.7101976839408344
+        """Set route points tracing the full NCRC circular loop.
 
-        wp1 = Pose()
-        wp1.position.x = 200.9136505126953
-        wp1.position.y = 332.71807861328125
-        wp1.position.z = 0.0
-        wp1.orientation.x = 0.0
-        wp1.orientation.y = 0.0
-        wp1.orientation.z = 0.1576494929852369
-        wp1.orientation.w = 0.98749513282927
+        Waypoints are sampled every ~10 edges along the 130-edge SUMO circular route,
+        converted from SUMO coordinates to Autoware map frame using UTM_offset.
+        The goal is set near the start so the route forms a complete circuit.
+        """
+        # Waypoints along the NCRC circular route (Autoware map frame)
+        # Generated from SUMO edge midpoints with UTM_offset = (-4373.24, -4104.69)
+        waypoints = [
+            self._make_pose(-0.7700, 1372.6400, 0.6975823055, 0.7165046594),       # wp0: edge 44119073300
+            self._make_pose(-914.4200, 1384.0700, -0.9507538173, 0.3099470583),     # wp1: edge 44114271901#0
+            self._make_pose(-2237.6000, 983.9100, -0.9429141934, 0.3330357698),     # wp2: edge 4411427171#0
+            self._make_pose(-3288.5200, 26.1400, -0.9736999601, 0.2278341234),      # wp3: edge 96869770
+            self._make_pose(-3723.4100, -530.8200, -0.7268381348, 0.6868087986),    # wp4: edge 4414481741#0
+            self._make_pose(-3760.5900, -1048.3600, -0.7332370654, 0.6799730920),   # wp5: edge 5139337630
+            self._make_pose(-3913.6700, -1957.5700, -0.7372619639, 0.6756069838),   # wp6: edge 21387995030#0
+            self._make_pose(-2903.0900, -2818.1700, -0.2788718999, 0.9603283102),   # wp7: edge 2577568300
+            self._make_pose(-2201.3200, -2933.3300, 0.0029538355, 0.9999956374),    # wp8: edge 4421661840#0
+            self._make_pose(-1063.2800, -3027.0500, -0.2939961851, 0.9558065930),   # wp9: edge 2135623740#0
+            self._make_pose(510.8800, -3466.6500, -0.1535604377, 0.9881392574),     # wp10: edge 4421796671#0
+            self._make_pose(369.8500, -1163.5700, 0.7042925037, 0.7099099022),      # wp11: edge 229035100
+            self._make_pose(73.2900, -187.7300, 0.8364255164, 0.5480806104),        # wp12: edge 44160408600
+        ]
 
-        wp2 = Pose()
-        wp2.position.x = 50.181983947753906
-        wp2.position.y = 164.53213500976562
-        wp2.position.z = 0.0
-        wp2.orientation.x = 0.0
-        wp2.orientation.y = 0.0
-        wp2.orientation.z = -0.7154038211799519
-        wp2.orientation.w = 0.6987112226385972
-
-        wp3 = Pose()
-        wp3.position.x = 107.86299133300781
-        wp3.position.y = 115.83384704589844
-        wp3.position.z = 0.0
-        wp3.orientation.x = 0.0
-        wp3.orientation.y = 0.0
-        wp3.orientation.z = -0.7211064990042112
-        wp3.orientation.w = 0.6928242324672901
-
-        wp4 = Pose()
-        wp4.position.x = 48.770851135253906
-        wp4.position.y = 0.559809684753418
-        wp4.position.z = 0.0
-        wp4.orientation.x = 0.0
-        wp4.orientation.y = 0.0
-        wp4.orientation.z = 0.06425407328302392
-        wp4.orientation.w = 0.9979335719708701
+        # Goal: near the start of the loop to complete the circuit
+        goal = self._make_pose(-0.7700, 1372.6400, 0.6975823055, 0.7165046594)
 
         # Wait for service
         while not self.cli_set_route_points.wait_for_service(timeout_sec=1.0):
@@ -163,12 +161,12 @@ class McityRouteSim(Node):
         # Create request
         request = SetRoutePoints.Request()
         request.header.frame_id = "map"
-        request.goal = wp4
-        request.waypoints = [wp0, wp1, wp2, wp3]
+        request.goal = goal
+        request.waypoints = waypoints
 
         # Send request
         future = self.cli_set_route_points.call_async(request)
-        self.get_logger().info("Setting new route...")
+        self.get_logger().info("Setting NCRC circular route (13 waypoints)...")
 
     def set_operation_mode(self, mode):
         """Set operation mode."""

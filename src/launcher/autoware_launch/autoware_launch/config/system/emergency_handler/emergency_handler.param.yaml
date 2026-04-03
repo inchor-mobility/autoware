@@ -1,4 +1,6 @@
 # Default configuration for emergency handler
+# Modified for co-simulation: raised emergency_hazard_level from 2 (LATENT_FAULT)
+# to 3 (SINGLE_POINT_FAULT) so transient WARN diagnostics don't trigger MRM.
 ---
 /**:
   ros__parameters:
@@ -8,6 +10,7 @@
     use_takeover_request: false
     use_parking_after_stopped: false
     use_comfortable_stop: false
+    emergency_hazard_level: 3
 
     # setting whether to turn hazard lamp on for each situation
     turning_hazard_on:

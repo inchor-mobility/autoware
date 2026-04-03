@@ -29,8 +29,9 @@
 
         /autoware/perception/node_alive_monitoring: default
 
-        /autoware/planning/node_alive_monitoring: default
-        /autoware/planning/performance_monitoring/trajectory_validation: default
+        # Relaxed for co-simulation: increased tolerance for transient planning delays
+        /autoware/planning/node_alive_monitoring: { sf_at: "none", lf_at: "error", spf_at: "error", auto_recovery: "true" }
+        /autoware/planning/performance_monitoring/trajectory_validation: { sf_at: "none", lf_at: "error", spf_at: "error", auto_recovery: "true" }
 
         # /autoware/sensing/node_alive_monitoring: default
 

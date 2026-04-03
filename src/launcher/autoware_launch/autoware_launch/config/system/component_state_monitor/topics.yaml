@@ -98,9 +98,9 @@
     topic_type: autoware_auto_planning_msgs/msg/Trajectory
     best_effort: false
     transient_local: false
-    warn_rate: 5.0
-    error_rate: 1.0
-    timeout: 1.0
+    warn_rate: 2.0
+    error_rate: 0.5
+    timeout: 3.0
 
 - module: control
   mode: [online, logging_simulation, planning_simulation]

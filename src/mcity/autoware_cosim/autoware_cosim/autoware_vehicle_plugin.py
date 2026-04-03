@@ -1,6 +1,8 @@
 import time
 import math
+import json
 import rclpy
+import redis
 import tf2_ros
 import numpy as np
 from rclpy.node import Node
@@ -30,9 +32,14 @@ class AutowareVehiclePlugin(Node):
 
         self.declare_parameter("control_cav", True)
         self.declare_parameter("cosim_controlled_vehicle_keys", [TERASIM_ACTOR_INFO])
+        self.declare_parameter("simulation_uuid", "")  # For reading construction objects from simulation state
 
         self.control_cav = self.get_parameter("control_cav").value
         self.cosim_controlled_vehicle_keys = self.get_parameter("cosim_controlled_vehicle_keys").value
+        self.simulation_uuid = self.get_parameter("simulation_uuid").value
+
+        # Standard Redis client for reading simulation state (construction objects)
+        self.state_redis_client = redis.Redis(host="localhost", port=6379, db=0)
 
         # autoware cav localization and display
         self.pub_pose = self.create_publisher(
@@ -214,9 +221,90 @@ class AutowareVehiclePlugin(Node):
                     if vehID != "CAV":
                         self.update_perception_in_autoware(vehID, data[vehID])
 
+        # Also read construction objects from simulation state if simulation_uuid is set
+        self.sync_construction_objects_to_autoware()
+
         self.detected_objects_msg.header.stamp = self.get_clock().now().to_msg()
         self.detected_objects_msg.header.frame_id = "map"
         self.pub_detected_objects.publish(self.detected_objects_msg)
+
+    def sync_construction_objects_to_autoware(self):
+        """Read construction objects from TeraSim simulation state and add to detected objects."""
+        if not self.simulation_uuid:
+            # Try to find simulation UUID by scanning Redis keys
+            try:
+                keys = self.state_redis_client.keys("simulation:*:state")
+                if keys:
+                    # Use the first simulation found
+                    key = keys[0].decode("utf-8")
+                    self.simulation_uuid = key.split(":")[1]
+                    self.get_logger().info(f"Auto-detected simulation UUID: {self.simulation_uuid}")
+            except Exception as e:
+                return
+
+        if not self.simulation_uuid:
+            return
+
+        try:
+            state_json = self.state_redis_client.get(f"simulation:{self.simulation_uuid}:state")
+            if not state_json:
+                return
+
+            state = json.loads(state_json)
+            construction_objects = state.get("construction_objects", {})
+
+            for obj_id, obj_data in construction_objects.items():
+                self.update_construction_object_in_autoware(obj_id, obj_data)
+
+        except Exception as e:
+            self.get_logger().debug(f"Error reading construction objects: {e}")
+
+    def update_construction_object_in_autoware(self, obj_id, obj_data):
+        """Add a construction object to the detected objects message."""
+        detected_object = DetectedObject()
+        detected_object.existence_probability = 1.0
+
+        # Classify as CAR so it flows through the prediction pipeline
+        # (UNKNOWN objects are dropped by map_based_prediction)
+        classification = ObjectClassification()
+        classification.label = ObjectClassification.CAR
+        classification.probability = 1.0
+        detected_object.classification.append(classification)
+
+        # Set pose
+        pose_with_cov = PoseWithCovariance()
+        pose_with_cov.pose.position.x = obj_data["x"] + self.UTM_offset[0]
+        pose_with_cov.pose.position.y = obj_data["y"] + self.UTM_offset[1]
+        pose_with_cov.pose.position.z = obj_data.get("z", 0.0)
+
+        orientation = obj_data.get("orientation", 0.0)
+        pose_with_cov.pose.orientation.w = cos(orientation / 2)
+        pose_with_cov.pose.orientation.x = 0.0
+        pose_with_cov.pose.orientation.y = 0.0
+        pose_with_cov.pose.orientation.z = sin(orientation / 2)
+
+        detected_object.kinematics.pose_with_covariance = pose_with_cov
+        detected_object.kinematics.has_position_covariance = False
+        detected_object.kinematics.orientation_availability = 0
+
+        # Set velocity (stationary)
+        twist_with_cov = TwistWithCovariance()
+        twist_with_cov.twist.linear.x = 0.0
+        twist_with_cov.twist.linear.y = 0.0
+        twist_with_cov.twist.linear.z = 0.0
+        detected_object.kinematics.twist_with_covariance = twist_with_cov
+        detected_object.kinematics.has_twist = True
+        detected_object.kinematics.has_twist_covariance = False
+
+        # Set shape - use provided dimensions or cone-like defaults
+        shape = Shape()
+        shape.type = Shape.BOUNDING_BOX
+        shape.dimensions.x = obj_data.get("length", 0.5)  # cone length
+        shape.dimensions.y = obj_data.get("width", 0.5)   # cone width
+        shape.dimensions.z = obj_data.get("height", 1.0)  # cone height
+        detected_object.shape = shape
+
+        self.detected_objects_msg.objects.append(detected_object)
 
     def get_pose_with_variance(self, bv_info):
         bv_pose_with_covariance = PoseWithCovariance()

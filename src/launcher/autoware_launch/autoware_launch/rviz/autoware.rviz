@@ -859,7 +859,7 @@ Visualization Manager:
                   Display Label: false
                   Display PoseWithCovariance: false
                   Display Predicted Path Confidence: false
-                  Display Predicted Paths: true
+                  Display Predicted Paths: false
                   Display Twist: false
                   Display UUID: false
                   Display Velocity: false

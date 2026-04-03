@@ -23,11 +23,12 @@ setup(
     entry_points={
         "console_scripts": [
             "autoware_vehicle_plugin = autoware_cosim.autoware_vehicle_plugin:main",
-            "autoware_vehicle_plugin_http = autoware_cosim.autoware_vehicle_plugin_http:main",
             "autoware_vehicle_report = autoware_cosim.autoware_vehicle_report:main",
             "autoware_tls_plugin = autoware_cosim.autoware_tls_plugin:main",
             "autoware_dummy_grid = autoware_cosim.autoware_dummy_grid:main",
             "autoware_planning = autoware_cosim.autoware_planning:main",
+            "test_cone_avoidance = autoware_cosim.test_cone_avoidance:main",
+            "nde_bridge = autoware_cosim.nde_bridge:main",
         ],
     },
 )

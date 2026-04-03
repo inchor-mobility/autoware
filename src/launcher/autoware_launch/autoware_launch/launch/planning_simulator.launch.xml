@@ -27,6 +27,8 @@
   <let name="rviz_respawn" value="true" unless="$(var scenario_simulation)"/>
   <!-- Vcu emulation -->
   <arg name="vehicle_simulation" default="true" description="use vehicle simulation"/>
+  <!-- Simulation time -->
+  <arg name="use_sim_time" default="false" description="use simulation time from /clock topic"/>
 
   <group scoped="false">
     <!-- Vehicle -->
@@ -58,6 +60,8 @@
       <arg name="rviz" value="$(var rviz)"/>
       <arg name="rviz_config" value="$(var rviz_config)"/>
       <arg name="rviz_respawn" value="$(var rviz_respawn)"/>
+      <!-- Simulation time -->
+      <arg name="use_sim_time" value="$(var use_sim_time)"/>
     </include>
   </group>
 

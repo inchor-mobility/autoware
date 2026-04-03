@@ -125,6 +125,7 @@ def launch_cosim_nodes(context):
             'map_path': map_path,
             'control_cav': control_cav,
             'perception_range': perception_range,
+            'use_sim_time': True,
         }]
     )
 
@@ -138,6 +139,7 @@ def launch_cosim_nodes(context):
             'http_host': http_host,
             'http_port': int(http_port),
             'simulation_id': simulation_id,
+            'use_sim_time': True,
         }]
     )
 

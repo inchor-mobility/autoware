@@ -5,13 +5,9 @@ BASE_URL="https://f005.backblazeb2.com/file/inchor-maps/autoware"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 FILES=(
-  "map/pointcloud_map.pcd"
-  "map/nishishinjuku.osm"
-  "map/lanelet2_mcity.osm"
-  "map/lanelet2_sample.osm"
-  "map/AA_Fixed_V13/pointcloud_map.pcd"
-  "map/AA_Fixed_V13/AA_Fixed_V13_lanelet2.osm"
-  "map/AA_Fixed_V13/map_projector_info.yaml"
+  "map/AA_Fixed_V14/pointcloud_map.pcd"
+  "map/AA_Fixed_V14/AA_Fixed_V13_lanelet2.osm"
+  "map/AA_Fixed_V14/map_projector_info.yaml"
 )
 
 updated=0

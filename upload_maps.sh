@@ -7,13 +7,9 @@ TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 FILES=(
-  "map/pointcloud_map.pcd"
-  "map/nishishinjuku.osm"
-  "map/lanelet2_mcity.osm"
-  "map/lanelet2_sample.osm"
-  "map/AA_Fixed_V13/pointcloud_map.pcd"
-  "map/AA_Fixed_V13/AA_Fixed_V13_lanelet2.osm"
-  "map/AA_Fixed_V13/map_projector_info.yaml"
+  "map/AA_Fixed_V14/pointcloud_map.pcd"
+  "map/AA_Fixed_V14/AA_Fixed_V13_lanelet2.osm"
+  "map/AA_Fixed_V14/map_projector_info.yaml"
 )
 
 for rel_path in "${FILES[@]}"; do

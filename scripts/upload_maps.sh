@@ -3,17 +3,18 @@ set -euo pipefail
 
 BUCKET="b2:inchor-maps/autoware"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 FILES=(
   "map/AA_Fixed_V14/pointcloud_map.pcd"
-  "map/AA_Fixed_V14/AA_Fixed_V13_lanelet2.osm"
+  "map/AA_Fixed_V14/AA_Fixed_V14_lanelet2.osm"
   "map/AA_Fixed_V14/map_projector_info.yaml"
 )
 
 for rel_path in "${FILES[@]}"; do
-  local_file="$SCRIPT_DIR/$rel_path"
+  local_file="$REPO_ROOT/$rel_path"
   remote_path="$BUCKET/$rel_path"
   tmp_md5="$TMP_DIR/$(echo "$rel_path" | tr '/' '_').md5"
 

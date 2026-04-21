@@ -3,10 +3,11 @@ set -euo pipefail
 
 BASE_URL="https://f005.backblazeb2.com/file/inchor-maps/autoware"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 FILES=(
   "map/AA_Fixed_V14/pointcloud_map.pcd"
-  "map/AA_Fixed_V14/AA_Fixed_V13_lanelet2.osm"
+  "map/AA_Fixed_V14/AA_Fixed_V14_lanelet2.osm"
   "map/AA_Fixed_V14/map_projector_info.yaml"
 )
 
@@ -22,7 +23,7 @@ md5_of_file() {
 }
 
 for rel_path in "${FILES[@]}"; do
-  local_file="$SCRIPT_DIR/$rel_path"
+  local_file="$REPO_ROOT/$rel_path"
   remote_url="$BASE_URL/$rel_path"
   local_dir="$(dirname "$local_file")"
 

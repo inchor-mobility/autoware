@@ -49,8 +49,11 @@ class AutowareVehiclePlugin(Node):
         self.declare_parameter("simulation_id", "")
         self.declare_parameter("control_cav", True)
         self.declare_parameter("perception_range", 150.0)  # meters, 0 = sync all
-        self.declare_parameter("utm_offset_x", -4373.24)   # NCRC default
-        self.declare_parameter("utm_offset_y", -4104.69)   # NCRC default
+        # utm_offset = SUMO_net_utm_origin - Autoware_map_utm_origin
+        # Always provided by TeraSim (scripts/autoware_cosim.py), auto-computed from
+        # the SUMO .net.xml and Autoware map_projector_info.yaml. Do not set manually.
+        self.declare_parameter("utm_offset_x", 0.0)
+        self.declare_parameter("utm_offset_y", 0.0)
 
         self.http_host = self.get_parameter("http_host").value
         self.http_port = self.get_parameter("http_port").value

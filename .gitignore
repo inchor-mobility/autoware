@@ -2,12 +2,4 @@ build/
 install/
 log/
 __pycache__/
-
-# Large map files — synced via sync_maps.sh from R2
-map/pointcloud_map.pcd
-map/nishishinjuku.osm
-map/lanelet2_mcity.osm
-map/lanelet2_sample.osm
-map/AA_Fixed_V13/pointcloud_map.pcd
-map/AA_Fixed_V13/AA_Fixed_V13_lanelet2.osm
-map/AA_Fixed_V13/map_projector_info.yaml
+map/

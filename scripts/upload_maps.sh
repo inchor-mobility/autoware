@@ -11,6 +11,9 @@ FILES=(
   "map/AA_Fixed_V14/pointcloud_map.pcd"
   "map/AA_Fixed_V14/AA_Fixed_V14_lanelet2.osm"
   "map/AA_Fixed_V14/map_projector_info.yaml"
+  "map/520toRapp/pointcloud_map.pcd"
+  "map/520toRapp/520toRapp_lanelet2.osm"
+  "map/520toRapp/map_projector_info.yaml"
 )
 
 for rel_path in "${FILES[@]}"; do

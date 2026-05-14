@@ -439,11 +439,17 @@ class AutowareVehiclePlugin(Node):
             predicted_object = self._create_predicted_object(vru_id, vru_info, is_pedestrian=True)
             predicted_objects_msg.objects.append(predicted_object)
 
-        # Process construction objects (cones, barriers, etc.)
-        # These need PredictedObjects for behavior_path_planner avoidance
-        # Always publish regardless of perception_range so AV can plan avoidance
+        # Process construction objects.
+        #   WZ_*  — decorative cones spawned by UrbanConstructionZone. They exist
+        #           only in the SUMO GUI / dash visualizer for visual flavor.
+        #           Skip them here so Autoware perception (and the avoidance
+        #           module) never sees them — only the real stalled vehicles
+        #           (CONSTRUCTION_BV_*_stalled_object) drive avoidance behavior.
+        #   CONSTRUCTION_BV_*  — real stalled vehicles, published normally.
         construction_objects = state.get("construction_objects", {})
         for obj_id, obj_info in construction_objects.items():
+            if obj_id.startswith("WZ_"):
+                continue
             detected_object = self._create_detected_object(obj_id, obj_info)
             detected_objects_msg.objects.append(detected_object)
             predicted_object = self._create_predicted_object(obj_id, obj_info)

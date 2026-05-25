@@ -10,6 +10,8 @@ Map: Ann Arbor NCRC area
   and lanelet2 stop line positions (20m distance, 0.7 cosine similarity)
 """
 
+import os
+import xml.etree.ElementTree as ET
 import requests
 import rclpy
 from rclpy.node import Node
@@ -113,6 +115,74 @@ class AutowareTLSPlugin(Node):
 
         self.get_logger().info(f"TLS plugin started: {self.base_url}, sim_id={self.simulation_id}")
 
+        # Unmapped-regelem fallback:
+        # Autoware lanelet2 map may declare traffic_light regulatory_elements for
+        # junctions that SUMO net.xml treats as `priority` (no TLS). For those
+        # regelems no SUMO state can be looked up — `traffic_light_module` then
+        # logs "traffic signal data ... not received" and blocks the planner,
+        # eventually leading to MRM_SUCCEEDED latch. As a fallback we publish
+        # GREEN for every traffic_light regelem in the map that is NOT covered by
+        # SUMO_TO_AUTOWARE_TLS_MAPPING. This lets Autoware proceed past those
+        # phantom-TLS junctions while keeping real mapped TLSes accurate.
+        self.declare_parameter(
+            "lanelet2_map_path",
+            "/home/haotian/Projects/Isuzu_cosim/autoware/map/AA_Fixed_V14/AA_Fixed_V14_lanelet2.osm",
+        )
+        self.lanelet2_map_path = self.get_parameter("lanelet2_map_path").value
+
+        mapped_reg_ids = {rid for entries in SUMO_TO_AUTOWARE_TLS_MAPPING.values() for rid, _ in entries}
+        self._unmapped_reg_ids = self._scan_unmapped_tl_reg_ids(mapped_reg_ids)
+        self.get_logger().info(
+            f"TLS mapping: {len(mapped_reg_ids)} reg_ids mapped to SUMO TLSes; "
+            f"{len(self._unmapped_reg_ids)} unmapped reg_ids will be published as GREEN."
+        )
+
+    def _scan_unmapped_tl_reg_ids(self, mapped_reg_ids):
+        """Parse lanelet2 .osm, return regulatory_element ids of type=traffic_light
+        that are NOT in mapped_reg_ids. Publishing GREEN for these unblocks the
+        Autoware planner when Autoware map has a TLS that SUMO does not."""
+        if not os.path.isfile(self.lanelet2_map_path):
+            self.get_logger().warn(f"lanelet2 map not found, no unmapped fallback: {self.lanelet2_map_path}")
+            return set()
+        try:
+            root = ET.parse(self.lanelet2_map_path).getroot()
+        except Exception as exc:
+            self.get_logger().error(f"failed to parse lanelet2 map: {exc}")
+            return set()
+        # Only publish GREEN for regelems that ALSO have a ref_line (stop line) member.
+        # Phantom regelems with traffic_light tag but no ref_line cause behavior_velocity_planner
+        # to log [FATAL] "No stop line at traffic_light_reg_elem_id = ..., please fix the map!"
+        # which crashes the planner container.
+        all_tl = set()
+        for r in root.iter("relation"):
+            tags = {t.attrib.get("k"): t.attrib.get("v") for t in r.findall("tag")}
+            if tags.get("type") != "regulatory_element" or tags.get("subtype") != "traffic_light":
+                continue
+            has_ref_line = any(m.attrib.get("role") == "ref_line" for m in r.findall("member"))
+            if not has_ref_line:
+                continue  # skip — would FATAL Autoware
+            try:
+                all_tl.add(int(r.attrib["id"]))
+            except (KeyError, ValueError):
+                continue
+        return all_tl - mapped_reg_ids
+
+    def _add_unmapped_green(self, signals):
+        """Populate `signals` dict with GREEN TrafficSignal for every unmapped reg_id
+        that wasn't already filled by the SUMO-driven mapping above."""
+        for reg_id in self._unmapped_reg_ids:
+            if reg_id in signals:
+                continue
+            elem = TrafficSignalElement()
+            elem.shape = TrafficSignalElement.CIRCLE
+            elem.status = TrafficSignalElement.SOLID_ON
+            elem.confidence = 1.0
+            elem.color = TrafficSignalElement.GREEN
+            sig = TrafficSignal()
+            sig.traffic_signal_id = reg_id
+            sig.elements = [elem]
+            signals[reg_id] = sig
+
     def _get_state(self):
         """Get simulation state from TeraSim HTTP API."""
         if not self.simulation_id:
@@ -133,10 +203,18 @@ class AutowareTLSPlugin(Node):
         self._sim_time = tick_msg.data
 
         state = self._get_state()
+        signals = {}
         if not state or "traffic_light_details" not in state:
+            # Still publish the unmapped-GREEN baseline so phantom-TLS lanelets
+            # don't block the planner during state-fetch hiccups.
+            self._add_unmapped_green(signals)
+            msg = TrafficSignalArray()
+            msg.stamp = self.get_clock().now().to_msg()
+            msg.signals = list(signals.values())
+            self.pub_traffic_signals.publish(msg)
+            self._last_msg = msg
             return
 
-        signals = {}
 
         # Each reg_elem maps to exactly 1 SUMO link (straight-priority dedup).
         # No aggregation needed. Priority kept for safety if duplicates exist.
@@ -179,6 +257,10 @@ class AutowareTLSPlugin(Node):
                     sig.traffic_signal_id = reg_id
                     sig.elements = [elem]
                     signals[reg_id] = sig
+
+        # Overlay GREEN for every unmapped traffic_light regelem so phantom-TLS
+        # lanelets (Autoware-side TLS with no SUMO counterpart) don't block planner.
+        self._add_unmapped_green(signals)
 
         # Use the node's clock (sim time if use_sim_time=true, wall clock otherwise)
         # This ensures the stamp always matches what Autoware expects

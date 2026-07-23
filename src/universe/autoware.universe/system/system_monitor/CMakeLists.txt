@@ -4,6 +4,16 @@ project(system_monitor)
 find_package(autoware_cmake REQUIRED)
 autoware_package()
 
+# INC-345: all 32 files here derive from rclcpp::Node but none include
+# <rclcpp/rclcpp.hpp> directly — they rely on diagnostic_updater.hpp pulling it
+# in transitively. Current diagnostic_updater tightened its headers, so the
+# package no longer compiles on a clean Humble (the host only builds because its
+# diagnostic_updater predates that change). Force-include rclcpp here instead of
+# patching 32 vendored upstream files. This package must build even though
+# co-sim never launches it: tier4_system_launch exec_depends on it, and colcon
+# refuses to build a package until every dependency's package.sh exists.
+add_compile_options(-include rclcpp/rclcpp.hpp)
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(NVML)
 find_package(fmt REQUIRED)

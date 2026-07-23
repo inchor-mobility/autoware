@@ -1,0 +1,36 @@
+# Build context = src/ (267M) and little else.
+# Same syntax caveat as TeraSim's: docker matches from the context root, so
+# nested patterns need `**/`.
+
+# Host build products — the image compiles its own
+build
+install
+log
+
+# Autoware map (1.1G) — mounted as a volume; a delivery image may bake it in (D6)
+map
+
+# Docs/assets not needed to build
+figure
+docs
+*.md
+
+.git
+.gitignore
+
+**/__pycache__
+**/*.py[cod]
+**/*.so
+**/*.o
+**/*.a
+
+# Secrets must never reach a distributable image
+.env
+.env.*
+**/*.pem
+**/*.key
+**/credentials*
+
+Dockerfile*
+.dockerignore
+docker-compose*.yml

@@ -1,5 +1,9 @@
 /**:
   ros__parameters:
     # ego
-    ego_nearest_dist_threshold: 3.0 # [m]
+    # 2026-10-06: 3.0 -> 5.0. The Hiratsuka route crosses two back-to-back
+    # ultra-short lanelets (6 m + 4 m) at n383 where the ego's lateral offset
+    # transiently exceeded 3 m and the nearest-search lost its anchor
+    # (trajectory-too-far deadlock). 5 m tolerates the transition.
+    ego_nearest_dist_threshold: 5.0 # [m]
     ego_nearest_yaw_threshold: 1.046 # [rad] = 60 [deg]

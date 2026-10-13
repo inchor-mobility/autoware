@@ -339,7 +339,7 @@ class AutowareVehiclePlugin(Node):
         # Get position from TeraSim (SUMO local coords)
         cav_x = cav["x"] + self.UTM_offset[0]
         cav_y = cav["y"] + self.UTM_offset[1]
-        cav_z = 0.0
+        cav_z = cav.get("z", 0.0)  # SUMO ground height (0 on planar nets)
         cav_orientation = cav.get("orientation", 0.0)
         cav_speed = cav.get("speed", 0.0)
 
@@ -485,7 +485,7 @@ class AutowareVehiclePlugin(Node):
         pose = PoseWithCovariance()
         pose.pose.position.x = x
         pose.pose.position.y = y
-        pose.pose.position.z = 0.8
+        pose.pose.position.z = agent_info.get("z", 0.0) + 0.8  # SUMO ground z + half height
         pose.pose.orientation.w = cos(orientation / 2)
         pose.pose.orientation.x = 0.0
         pose.pose.orientation.y = 0.0
@@ -553,7 +553,7 @@ class AutowareVehiclePlugin(Node):
         pose = PoseWithCovariance()
         pose.pose.position.x = x
         pose.pose.position.y = y
-        pose.pose.position.z = 0.8
+        pose.pose.position.z = agent_info.get("z", 0.0) + 0.8  # SUMO ground z + half height
         pose.pose.orientation.x = 0.0
         pose.pose.orientation.y = 0.0
         pose.pose.orientation.z = qz
@@ -575,7 +575,7 @@ class AutowareVehiclePlugin(Node):
         current_pose = Pose()
         current_pose.position.x = x
         current_pose.position.y = y
-        current_pose.position.z = 0.8
+        current_pose.position.z = agent_info.get("z", 0.0) + 0.8
         current_pose.orientation.x = 0.0
         current_pose.orientation.y = 0.0
         current_pose.orientation.z = qz
@@ -585,7 +585,7 @@ class AutowareVehiclePlugin(Node):
         future_pose = Pose()
         future_pose.position.x = x + speed * cos(orientation)
         future_pose.position.y = y + speed * sin(orientation)
-        future_pose.position.z = 0.8
+        future_pose.position.z = agent_info.get("z", 0.0) + 0.8
         future_pose.orientation.x = 0.0
         future_pose.orientation.y = 0.0
         future_pose.orientation.z = qz

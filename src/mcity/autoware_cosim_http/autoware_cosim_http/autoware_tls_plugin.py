@@ -90,21 +90,22 @@ SUMO_TO_AUTOWARE_TLS_MAPPING = {
     # --- hiratsuka_ll2 (lanelet2-centerline net, ground-truth relight 2026-10-05:
     #     TLS rebuilt from repaired3 traffic_light regelems, one tlLogic per original-map
     #     intersection_area, stop-line anchored, generated default timing):
-    #     61/83 road-governing regelems bound to link indices of the CURRENT net;
-    #     the other 22 govern orphan leftover-copy corridors with no inbound
-    #     connection (unreachable in SUMO -> GREEN fallback is correct) ---
-    'gt1539': [(1000, 5), (1001, 2), (1002, 1), (1003, 3), (1004, 4), (1005, 0)],
+    #     every signal-controlled vehicle link carries the regelem(s) of its
+    #     movement (89285 = north-rotary left lane, added to repaired3); the 20
+    #     road regelems left unbound govern side-road movements the lanelet2 map
+    #     draws as dead-end stubs, which SUMO does not model ---
+    'gt1539': [(1000, 5), (1001, 2), (1002, 1), (1003, 3), (1004, 4), (1005, 0), (1000, 6), (1000, 7), (1002, 8)],
     'gt1545': [(1010, 1), (1011, 2), (1012, 3), (1013, 4), (1014, 0)],
     'gt1548': [(1021, 1), (1022, 0), (1023, 0), (1024, 0)],
     'gt1550': [(1026, 0), (1027, 1)],
     'gt1551': [(1030, 1), (1032, 0)],
-    'gt1553': [(1036, 5), (1037, 1), (1039, 2), (1040, 4), (1041, 0), (1043, 3)],
+    'gt1553': [(1036, 5), (1037, 1), (1038, 6), (1039, 2), (1040, 4), (1041, 0), (1043, 3)],
     'gt1554': [(1044, 6), (1045, 0), (1046, 1), (1047, 2), (1048, 4), (1049, 3), (1050, 5)],
     'gt1555': [(1051, 3), (1052, 4), (1053, 0), (1054, 1), (1055, 2)],
-    'gt1556': [(1061, 3), (1062, 4), (1063, 0), (1064, 2)],
-    'gt1558': [(1066, 7), (1067, 0), (1068, 6), (1070, 9), (1071, 8), (70225, 5)],
+    'gt1556': [(1061, 3), (1062, 4), (1063, 0), (1064, 2), (1063, 1)],
+    'gt1558': [(1066, 7), (1067, 0), (1068, 6), (1070, 9), (1071, 8), (70225, 5), (1067, 1), (1070, 4), (70225, 10)],
     'gt1573': [(1083, 0), (1085, 4), (1087, 1), (1088, 2), (1090, 3)],
-    'gt1576': [(1091, 1), (1092, 3), (1094, 2), (71360, 1)],
+    'gt1576': [(1091, 1), (1092, 3), (1094, 2), (1095, 0), (71360, 1), (89285, 5)],
     'gt1577': [(1096, 1), (1097, 2)],
     'gt1583': [(1098, 0), (1102, 1), (1105, 2)],
 }
@@ -145,6 +146,8 @@ class AutowareTLSPlugin(Node):
 
         # State cache
         self.last_state = None
+        self._stopline_tl_ids = set()
+        self._coverage_logged = False
         self._sim_time = 0.0
 
         self.get_logger().info(f"TLS plugin started: {self.base_url}, sim_id={self.simulation_id}")
@@ -234,6 +237,7 @@ class AutowareTLSPlugin(Node):
                 all_tl.add(int(r.attrib["id"]))
             except (KeyError, ValueError):
                 continue
+        self._stopline_tl_ids = all_tl
         return all_tl - mapped_reg_ids
 
     def _add_unmapped_green(self, signals):
@@ -299,6 +303,9 @@ class AutowareTLSPlugin(Node):
             'G': TrafficSignalElement.GREEN,  # protected green -> GREEN
         }
 
+        if not self._coverage_logged:
+            self._log_live_coverage(state["traffic_light_details"].keys())
+
         # Process each SUMO traffic light
         for tls_id, tls_info in state["traffic_light_details"].items():
             state_str = tls_info.get("tls", "") if isinstance(tls_info, dict) else tls_info
@@ -338,6 +345,21 @@ class AutowareTLSPlugin(Node):
         msg.signals = list(signals.values())
         self.pub_traffic_signals.publish(msg)
         self._last_msg = msg  # cache for re-publish
+
+    def _log_live_coverage(self, live_tls_ids):
+        """Once per run: coverage against the TLS ids this scenario really has.
+
+        The startup line counts a regelem as mapped if ANY scenario's table
+        names it; this one only counts bindings to TLS present in the sim."""
+        self._coverage_logged = True
+        live = {rid for tid in live_tls_ids for rid, _ in SUMO_TO_AUTOWARE_TLS_MAPPING.get(tid, [])}
+        stop = self._stopline_tl_ids
+        silent = stop - live - self._unmapped_reg_ids
+        self.get_logger().info(
+            f"live TLS coverage: {len(stop & live)}/{len(stop)} stop-line traffic lights follow "
+            f"SUMO ({len(list(live_tls_ids))} TLS in this scenario); "
+            f"{len(self._unmapped_reg_ids & stop)} GREEN fallback; {len(silent)} not published"
+            + (f" ({','.join(str(r) for r in sorted(silent))})" if silent else ""))
 
     def republish(self):
         """Re-publish cached TLS signals with fresh timestamp to prevent staleness."""

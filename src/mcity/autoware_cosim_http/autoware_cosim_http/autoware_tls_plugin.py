@@ -93,21 +93,23 @@ SUMO_TO_AUTOWARE_TLS_MAPPING = {
     #     every signal-controlled vehicle link carries the regelem(s) of its
     #     movement (89285 = north-rotary left lane, added to repaired3); the 20
     #     road regelems left unbound govern side-road movements the lanelet2 map
-    #     draws as dead-end stubs, which SUMO does not model ---
+    #     draws as dead-end stubs, which SUMO does not model; crosswalk
+    #     (pedestrian) lights follow the walk link appended to the program
+    #     of the traffic they cross ---
     'gt1539': [(1000, 5), (1001, 2), (1002, 1), (1003, 3), (1004, 4), (1005, 0), (1000, 6), (1000, 7), (1002, 8)],
-    'gt1545': [(1010, 1), (1011, 2), (1012, 3), (1013, 4), (1014, 0)],
-    'gt1548': [(1021, 1), (1022, 0), (1023, 0), (1024, 0)],
-    'gt1550': [(1026, 0), (1027, 1)],
-    'gt1551': [(1030, 1), (1032, 0)],
+    'gt1545': [(1010, 1), (1011, 2), (1012, 3), (1013, 4), (1014, 0), (1109, 5), (1110, 6), (1111, 7)],
+    'gt1548': [(1021, 1), (1022, 0), (1023, 0), (1024, 0), (1116, 2), (1117, 3)],
+    'gt1550': [(1026, 0), (1027, 1), (1120, 2), (1122, 3)],
+    'gt1551': [(1030, 1), (1032, 0), (1127, 2), (1129, 3)],
     'gt1553': [(1036, 5), (1037, 1), (1038, 6), (1039, 2), (1040, 4), (1041, 0), (1043, 3)],
-    'gt1554': [(1044, 6), (1045, 0), (1046, 1), (1047, 2), (1048, 4), (1049, 3), (1050, 5)],
-    'gt1555': [(1051, 3), (1052, 4), (1053, 0), (1054, 1), (1055, 2)],
-    'gt1556': [(1061, 3), (1062, 4), (1063, 0), (1064, 2), (1063, 1)],
-    'gt1558': [(1066, 7), (1067, 0), (1068, 6), (1070, 9), (1071, 8), (70225, 5), (1067, 1), (1070, 4), (70225, 10)],
-    'gt1573': [(1083, 0), (1085, 4), (1087, 1), (1088, 2), (1090, 3)],
-    'gt1576': [(1091, 1), (1092, 3), (1094, 2), (1095, 0), (71360, 1), (89285, 5)],
-    'gt1577': [(1096, 1), (1097, 2)],
-    'gt1583': [(1098, 0), (1102, 1), (1105, 2)],
+    'gt1554': [(1044, 6), (1045, 0), (1046, 1), (1047, 2), (1048, 4), (1049, 3), (1050, 5), (1112, 7), (1113, 8), (1114, 9)],
+    'gt1555': [(1051, 3), (1052, 4), (1053, 0), (1054, 1), (1055, 2), (1106, 5), (1107, 6), (1108, 7)],
+    'gt1556': [(1061, 3), (1062, 4), (1063, 0), (1064, 2), (1063, 1), (1123, 5), (1125, 6)],
+    'gt1558': [(1066, 7), (1067, 0), (1068, 6), (1070, 9), (1071, 8), (70225, 5), (1067, 1), (1070, 4), (70225, 10), (1135, 11), (1138, 12)],
+    'gt1573': [(1083, 0), (1085, 4), (1087, 1), (1088, 2), (1090, 3), (1141, 5), (1144, 6)],
+    'gt1576': [(1091, 1), (1092, 3), (1094, 2), (1095, 0), (71360, 1), (89285, 4), (1134, 5), (1145, 6), (1148, 7)],
+    'gt1577': [(1096, 1), (1097, 2), (1133, 3), (1146, 4), (1147, 5)],
+    'gt1583': [(1098, 0), (1102, 1), (1105, 2), (1130, 3), (1132, 4), (1140, 5)],
 }
 
 
@@ -147,6 +149,7 @@ class AutowareTLSPlugin(Node):
         # State cache
         self.last_state = None
         self._stopline_tl_ids = set()
+        self._crosswalk_tl_ids = set()
         self._coverage_logged = False
         self._sim_time = 0.0
 
@@ -238,6 +241,18 @@ class AutowareTLSPlugin(Node):
             except (KeyError, ValueError):
                 continue
         self._stopline_tl_ids = all_tl
+        # pedestrian lights: traffic_light regelems referred to by crosswalk lanelets
+        tl_any = set()
+        for r in root.iter("relation"):
+            tags = {t.attrib.get("k"): t.attrib.get("v") for t in r.findall("tag")}
+            if tags.get("type") == "regulatory_element" and tags.get("subtype") == "traffic_light":
+                tl_any.add(r.attrib.get("id"))
+        for r in root.iter("relation"):
+            tags = {t.attrib.get("k"): t.attrib.get("v") for t in r.findall("tag")}
+            if tags.get("type") == "lanelet" and tags.get("subtype") == "crosswalk":
+                self._crosswalk_tl_ids |= {int(m.attrib["ref"]) for m in r.findall("member")
+                                           if m.attrib.get("role") == "regulatory_element"
+                                           and m.attrib.get("ref") in tl_any}
         return all_tl - mapped_reg_ids
 
     def _add_unmapped_green(self, signals):
@@ -359,7 +374,9 @@ class AutowareTLSPlugin(Node):
             f"live TLS coverage: {len(stop & live)}/{len(stop)} stop-line traffic lights follow "
             f"SUMO ({len(list(live_tls_ids))} TLS in this scenario); "
             f"{len(self._unmapped_reg_ids & stop)} GREEN fallback; {len(silent)} not published"
-            + (f" ({','.join(str(r) for r in sorted(silent))})" if silent else ""))
+            + (f" ({','.join(str(r) for r in sorted(silent))})" if silent else "")
+            + (f"; crosswalk lights: {len(self._crosswalk_tl_ids & live)}/{len(self._crosswalk_tl_ids)} follow SUMO"
+               if self._crosswalk_tl_ids else ""))
 
     def republish(self):
         """Re-publish cached TLS signals with fresh timestamp to prevent staleness."""
